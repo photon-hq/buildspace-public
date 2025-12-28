@@ -7,19 +7,29 @@ on:
 jobs:
   sync-to-private:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout buildspace repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Verify SYNC_TOKEN exists
+        run: |
+          if [ -z "${{ secrets.SYNC_TOKEN }}" ]; then
+            echo "::error::SYNC_TOKEN secret is not set. Please add it to repository secrets."
+            exit 1
+          fi
+
       - name: Push to buildspace-private repo
         env:
-          API_TOKEN: ${{ secrets.GH_TOKEN }}
+          API_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
           
-          git remote add private https://x-access-token:${API_TOKEN}@github.com/photon-hq/buildspace-private.git
+          git remote add private https://x-access-token:${API_TOKEN}@github.com/photon-hq/buildspace-private
           
-          git push private main --force
+          # Push with set-upstream for empty repos
+          git push private main:main --force --set-upstream || git push private main --force
