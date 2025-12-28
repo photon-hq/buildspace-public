@@ -1,0 +1,25 @@
+name: Sync to buildspace-private
+
+on: 
+  push: 
+    branches: [main]
+
+jobs:
+  sync-to-private:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout buildspace repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to buildspace-private repo
+        env:
+          API_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          
+          git remote add private https://x-access-token:${API_TOKEN}@github.com/photon-hq/buildspace-private.git
+          
+          git push private main --force
