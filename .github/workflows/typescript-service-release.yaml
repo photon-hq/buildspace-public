@@ -171,12 +171,11 @@ jobs:
           LAST_SHA="${{ steps.last-release.outputs.sha }}"
           CURRENT_SHA="${{ github.sha }}"
           
-          # Get all commits between last release and current SHA
-          COMMITS_SIMPLE=$(git log ${LAST_SHA}..${CURRENT_SHA} --pretty=format:"%s%n%b" --no-merges)
+          # Write commits directly to file to avoid multiline output issues
+          git log ${LAST_SHA}..${CURRENT_SHA} --pretty=format:"%s%n%b" --no-merges > /tmp/commits.txt || echo "" > /tmp/commits.txt
           
-          echo "commits_simple<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMITS_SIMPLE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Set output for reference
+          echo "commits_count=$(git log ${LAST_SHA}..${CURRENT_SHA} --oneline --no-merges | wc -l)" >> $GITHUB_OUTPUT
 
       - name: Get code diff
         id: diff
@@ -184,67 +183,68 @@ jobs:
           LAST_SHA="${{ steps.last-release.outputs.sha }}"
           CURRENT_SHA="${{ github.sha }}"
           
-          # Get file changes summary (what files changed)
-          FILES_CHANGED=$(git diff --name-status ${LAST_SHA}..${CURRENT_SHA})
+          # Write directly to files to avoid multiline output issues
+          git diff --name-status ${LAST_SHA}..${CURRENT_SHA} > /tmp/files_changed.txt || true
+          git diff --stat ${LAST_SHA}..${CURRENT_SHA} > /tmp/diff_stats.txt || true
+          git diff ${LAST_SHA}..${CURRENT_SHA} -- . ':(exclude)package-lock.json' ':(exclude)bun.lock' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' | head -c 50000 > /tmp/diff.txt || true
           
-          # Get diff stats (how much changed per file)
-          DIFF_STATS=$(git diff --stat ${LAST_SHA}..${CURRENT_SHA})
-          
-          # Get actual diff (limited to avoid huge output)
-          # Exclude package-lock, bun.lock, and other lock files
-          DIFF=$(git diff ${LAST_SHA}..${CURRENT_SHA} -- . ':(exclude)package-lock.json' ':(exclude)bun.lock' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' | head -c 50000)
-          
-          echo "files_changed<<EOF" >> $GITHUB_OUTPUT
-          echo "$FILES_CHANGED" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-          echo "diff_stats<<EOF" >> $GITHUB_OUTPUT
-          echo "$DIFF_STATS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-          echo "diff<<EOF" >> $GITHUB_OUTPUT
-          echo "$DIFF" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Set outputs for reference (empty if no changes)
+          echo "files_changed=$(cat /tmp/files_changed.txt | wc -l)" >> $GITHUB_OUTPUT
+          echo "has_changes=$(if [ -s /tmp/diff.txt ]; then echo 'true'; else echo 'false'; fi)" >> $GITHUB_OUTPUT
             
+      - name: Prepare variables for AI prompts
+        id: prepare-vars
+        run: |
+          # Write simple variables to files
+          echo "${{ steps.last-release.outputs.version }}" > /tmp/current_version.txt
+          echo "${{ steps.last-release.outputs.sha }}" > /tmp/last_sha.txt
+          echo "${{ github.sha }}" > /tmp/current_sha.txt
+          # Note: commits.txt, files_changed.txt, diff_stats.txt, and diff.txt 
+          # are already written in previous steps
+
       - name: AI Determine new release version
         id: ai-version
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          printf '%s\n' \
-            "Analyze these git commits and code changes to determine the next semantic version number." \
-            "" \
-            "Current Version: ${{ steps.last-release.outputs.version }}" \
-            "Last Release SHA: ${{ steps.last-release.outputs.sha }}" \
-            "Current SHA: ${{ github.sha }}" \
-            "" \
-            "Commit messages:" \
-            "${{ steps.commits.outputs.commits_simple }}" \
-            "" \
-            "Files changed:" \
-            "${{ steps.diff.outputs.files_changed }}" \
-            "" \
-            "Diff stats:" \
-            "${{ steps.diff.outputs.diff_stats }}" \
-            "" \
-            "Code changes (partial):" \
-            "${{ steps.diff.outputs.diff }}" \
-            "" \
-            "Based on the actual code changes, determine what the most appropriate release type should be:" \
-            "- BREAKING CHANGE or ! in commit OR breaking API changes in code = major version bump" \
-            "- feat: prefix OR new features in code = minor version bump" \
-            "- fix: or perf: prefix OR bug fixes in code = patch version bump" \
-            "- No significant changes = no release needed" \
-            "" \
-            "X.Y.Z = the version number to release" \
-            "Where X = Major release/breaking changes" \
-            "Where Y = Minor release/new features" \
-            "Where Z = Patch release/bug fixes" \
-            "Respond with ONLY the version number in format X.Y.Z (e.g., 1.2.3) or \"none\" if no release is needed." \
-            "Do not include any other text, explanation, or markdown formatting." > /tmp/version_prompt.txt
+          set -e
           
+          # Build version prompt
+          {
+            echo "Analyze these git commits and code changes to determine the next semantic version number."
+            echo ""
+            echo "Current Version: $(cat /tmp/current_version.txt)"
+            echo "Last Release SHA: $(cat /tmp/last_sha.txt)"
+            echo "Current SHA: $(cat /tmp/current_sha.txt)"
+            echo ""
+            echo "Commit messages:"
+            cat /tmp/commits.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Files changed:"
+            cat /tmp/files_changed.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Diff stats:"
+            cat /tmp/diff_stats.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Code changes (partial):"
+            cat /tmp/diff.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Based on the actual code changes, determine what the most appropriate release type should be:"
+            echo "- BREAKING CHANGE or ! in commit OR breaking API changes in code = major version bump"
+            echo "- feat: prefix OR new features in code = minor version bump"
+            echo "- fix: or perf: prefix OR bug fixes in code = patch version bump"
+            echo "- No significant changes = no release needed"
+            echo ""
+            echo "X.Y.Z = the version number to release"
+            echo "Where X = Major release/breaking changes"
+            echo "Where Y = Minor release/new features"
+            echo "Where Z = Patch release/bug fixes"
+            echo "Respond with ONLY the version number in format X.Y.Z (e.g., 1.2.3) or \"none\" if no release is needed."
+            echo "Do not include any other text, explanation, or markdown formatting."
+          } > /tmp/version_prompt.txt
+          
+          # Call OpenAI API
           PROMPT=$(cat /tmp/version_prompt.txt)
-          
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
@@ -296,44 +296,60 @@ jobs:
             echo "Creating release: $FINAL_VERSION"
           fi
 
+      - name: Prepare variables for release notes
+        id: prepare-notes-vars
+        if: steps.parse-version.outputs.should_release == 'true'
+        run: |
+          printf '%s\n' "${{ steps.final-version.outputs.final_version }}" > /tmp/new_version.txt
+          printf '%s\n' "${{ inputs.service-name }}" > /tmp/service_name.txt
+
       - name: Generate AI Release Notes
         id: ai-notes
         if: steps.parse-version.outputs.should_release == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          printf '%s\n' \
-            "Generate a comprehensive release note in markdown format for the changes between two versions." \
-            "" \
-            "Current Version: ${{ steps.last-release.outputs.version }}" \
-            "New Version: ${{ steps.final-version.outputs.final_version }}" \
-            "Last Release SHA: ${{ steps.last-release.outputs.sha }}" \
-            "Current SHA: ${{ github.sha }}" \
-            "Service Name: ${{ inputs.service-name }}" \
-            "" \
-            "Commit messages:" \
-            "${{ steps.commits.outputs.commits_simple }}" \
-            "" \
-            "Files changed:" \
-            "${{ steps.diff.outputs.files_changed }}" \
-            "" \
-            "Diff stats:" \
-            "${{ steps.diff.outputs.diff_stats }}" \
-            "" \
-            "Code changes (partial):" \
-            "${{ steps.diff.outputs.diff }}" \
-            "" \
-            "Analyze BOTH the commit messages AND the actual code changes to create a well-formatted release note with:" \
-            "- Summary of changes (based on actual code diff)" \
-            "- Breaking changes (if any, check both commit messages and API changes in code)" \
-            "- New features (feat: commits and new functionality in code)" \
-            "- Bug fixes (fix: commits and bug fixes in code)" \
-            "- Other improvements (perf:, refactor:, docs:, etc.)" \
-            "" \
-            "Use the code diff to provide specific, accurate details about what changed. Format the release notes professionally with proper markdown headings and bullet points. Make it user-friendly and easy to understand." > /tmp/notes_prompt.txt
+          set -e
           
+          # Build release notes prompt
+          {
+            echo "Generate release notes in markdown format. DO NOT include a title or header at the top. Start directly with the first section (e.g., ## New Features)."
+            echo ""
+            echo "Current Version: $(cat /tmp/current_version.txt)"
+            echo "New Version: $(cat /tmp/new_version.txt)"
+            echo "Last Release SHA: $(cat /tmp/last_sha.txt)"
+            echo "Current SHA: $(cat /tmp/current_sha.txt)"
+            echo "Service Name: $(cat /tmp/service_name.txt)"
+            echo ""
+            echo "Commit messages:"
+            cat /tmp/commits.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Files changed:"
+            cat /tmp/files_changed.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Diff stats:"
+            cat /tmp/diff_stats.txt 2>/dev/null || echo ""
+            echo ""
+            echo "Code changes (partial):"
+            cat /tmp/diff.txt 2>/dev/null || echo ""
+            echo ""
+            echo "REQUIREMENTS:"
+            echo ""
+            echo "1. NO title - Start directly with content"
+            echo "2. Use plain language - Write like explaining to a friend (history degree, not CS)"
+            echo "3. Keep it SHORT - 1-2 sentences per item max"
+            echo "4. Group logically - Use headers: ## New Features, ## Bug Fixes, ## Improvements (NO emojis in headers)"
+            echo "5. Only include breaking changes if they exist - Don't mention if there are none"
+            echo "6. NO commit section - Don't include commit SHA or messages"
+            echo "7. NO diff section - Don't show code diffs"
+            echo "8. Use emojis SPARINGLY - Only use 1-2 emojis total, prefer people emojis (🙋‍♀️🙋‍♂️👋) over decorative ones"
+            echo "9. Show personality - Be friendly and engaging like Slack's release notes"
+            echo ""
+            echo "Analyze commits and code changes. Create brief, organized release notes with minimal emoji usage."
+          } > /tmp/notes_prompt.txt
+          
+          # Call OpenAI API
           PROMPT=$(cat /tmp/notes_prompt.txt)
-          
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
@@ -343,36 +359,49 @@ jobs:
               \"temperature\": 0.7
             }")
           
-          AI_NOTES=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
-          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$AI_NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          AI_NOTES=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' || echo "")
+          if [ -z "$AI_NOTES" ]; then
+            echo "::error::Failed to get AI response"
+            exit 1
+          fi
+          
+          # Write to file first to avoid any shell interpretation issues
+          printf '%s\n' "$AI_NOTES" > /tmp/ai_notes.txt
+          
+          # Use multiline output format to safely handle any special characters
+          {
+            echo "release_notes<<EOF"
+            cat /tmp/ai_notes.txt
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Prepare release body
         id: release-body
         if: steps.parse-version.outputs.should_release == 'true'
         run: |
-          AI_NOTES="${{ steps.ai-notes.outputs.release_notes }}"
-          if [ -n "$AI_NOTES" ] && [ "$AI_NOTES" != "" ]; then
-            echo "body<<EOF" >> $GITHUB_OUTPUT
-            echo "$AI_NOTES" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "---" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "**Version:** ${{ steps.last-release.outputs.version }} → ${{ steps.final-version.outputs.final_version }}" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+          # Use the AI notes file we already created, or fall back to basic format
+          if [ -s /tmp/ai_notes.txt ]; then
+            # Build body with AI notes
+            cp /tmp/ai_notes.txt /tmp/body.txt
+            echo "" >> /tmp/body.txt
+            echo "---" >> /tmp/body.txt
+            echo "" >> /tmp/body.txt
+            echo "**Version:** ${{ steps.last-release.outputs.version }} → ${{ steps.final-version.outputs.final_version }}" >> /tmp/body.txt
           else
-            echo "body<<EOF" >> $GITHUB_OUTPUT
-            echo "## Release ${{ steps.final-version.outputs.final_version }}" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "**Version:** ${{ steps.last-release.outputs.version }} → ${{ steps.final-version.outputs.final_version }}" >> $GITHUB_OUTPUT
-            echo "" >> $GITHUB_OUTPUT
-            echo "### Changes" >> $GITHUB_OUTPUT
-            echo "\`\`\`" >> $GITHUB_OUTPUT
-            echo "${{ steps.commits.outputs.commits_simple }}" >> $GITHUB_OUTPUT
-            echo "\`\`\`" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            # Fallback: basic release notes
+            echo "## Release ${{ steps.final-version.outputs.final_version }}" > /tmp/body.txt
+            echo "" >> /tmp/body.txt
+            echo "**Version:** ${{ steps.last-release.outputs.version }} → ${{ steps.final-version.outputs.final_version }}" >> /tmp/body.txt
+            echo "" >> /tmp/body.txt
+            echo "### Changes" >> /tmp/body.txt
+            echo "" >> /tmp/body.txt
+            cat /tmp/commits.txt >> /tmp/body.txt 2>/dev/null || echo "No commits available" >> /tmp/body.txt
           fi
+          
+          # Write to output using multiline format
+          echo "body<<BODY_EOF" >> $GITHUB_OUTPUT
+          cat /tmp/body.txt >> $GITHUB_OUTPUT
+          echo "BODY_EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         if: steps.parse-version.outputs.should_release == 'true'
