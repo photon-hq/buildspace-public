@@ -176,30 +176,74 @@ jobs:
           
           echo "commits_simple<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS_SIMPLE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT 
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get code diff
+        id: diff
+        run: |
+          LAST_SHA="${{ steps.last-release.outputs.sha }}"
+          CURRENT_SHA="${{ github.sha }}"
+          
+          # Get file changes summary (what files changed)
+          FILES_CHANGED=$(git diff --name-status ${LAST_SHA}..${CURRENT_SHA})
+          
+          # Get diff stats (how much changed per file)
+          DIFF_STATS=$(git diff --stat ${LAST_SHA}..${CURRENT_SHA})
+          
+          # Get actual diff (limited to avoid huge output)
+          # Exclude package-lock, bun.lock, and other lock files
+          DIFF=$(git diff ${LAST_SHA}..${CURRENT_SHA} -- . ':(exclude)package-lock.json' ':(exclude)bun.lock' ':(exclude)yarn.lock' ':(exclude)pnpm-lock.yaml' | head -c 50000)
+          
+          echo "files_changed<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "diff_stats<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF_STATS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "diff<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
             
       - name: AI Determine new release version
         id: ai-version
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          PROMPT="Analyze these git commits and determine the next semantic version number.
+          printf '%s\n' \
+            "Analyze these git commits and code changes to determine the next semantic version number." \
+            "" \
+            "Current Version: ${{ steps.last-release.outputs.version }}" \
+            "Last Release SHA: ${{ steps.last-release.outputs.sha }}" \
+            "Current SHA: ${{ github.sha }}" \
+            "" \
+            "Commit messages:" \
+            "${{ steps.commits.outputs.commits_simple }}" \
+            "" \
+            "Files changed:" \
+            "${{ steps.diff.outputs.files_changed }}" \
+            "" \
+            "Diff stats:" \
+            "${{ steps.diff.outputs.diff_stats }}" \
+            "" \
+            "Code changes (partial):" \
+            "${{ steps.diff.outputs.diff }}" \
+            "" \
+            "Based on the actual code changes, determine what the most appropriate release type should be:" \
+            "- BREAKING CHANGE or ! in commit OR breaking API changes in code = major version bump" \
+            "- feat: prefix OR new features in code = minor version bump" \
+            "- fix: or perf: prefix OR bug fixes in code = patch version bump" \
+            "- No significant changes = no release needed" \
+            "" \
+            "X.Y.Z = the version number to release" \
+            "Where X = Major release/breaking changes" \
+            "Where Y = Minor release/new features" \
+            "Where Z = Patch release/bug fixes" \
+            "Respond with ONLY the version number in format X.Y.Z (e.g., 1.2.3) or \"none\" if no release is needed." \
+            "Do not include any other text, explanation, or markdown formatting." > /tmp/version_prompt.txt
           
-          Current Version: ${{ steps.last-release.outputs.version }}
-          Last Release SHA: ${{ steps.last-release.outputs.sha }}
-          Current SHA: ${{ github.sha }}
-          
-          Unreleased commits:
-          ${{ steps.commits.outputs.commits_simple }}
-          
-          Based on conventional commit standards:
-          - BREAKING CHANGE or ! in commit = major version bump
-          - feat: prefix = minor version bump  
-          - fix: or perf: prefix = patch version bump
-          - No significant changes = no release needed
-          
-          Respond with ONLY the version number in format X.Y.Z (e.g., 1.2.3) or \"none\" if no release is needed.
-          Do not include any other text, explanation, or markdown formatting."
+          PROMPT=$(cat /tmp/version_prompt.txt)
           
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
@@ -258,25 +302,37 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          PROMPT="Generate a comprehensive release note in markdown format for the changes between two versions.
+          printf '%s\n' \
+            "Generate a comprehensive release note in markdown format for the changes between two versions." \
+            "" \
+            "Current Version: ${{ steps.last-release.outputs.version }}" \
+            "New Version: ${{ steps.final-version.outputs.final_version }}" \
+            "Last Release SHA: ${{ steps.last-release.outputs.sha }}" \
+            "Current SHA: ${{ github.sha }}" \
+            "Service Name: ${{ inputs.service-name }}" \
+            "" \
+            "Commit messages:" \
+            "${{ steps.commits.outputs.commits_simple }}" \
+            "" \
+            "Files changed:" \
+            "${{ steps.diff.outputs.files_changed }}" \
+            "" \
+            "Diff stats:" \
+            "${{ steps.diff.outputs.diff_stats }}" \
+            "" \
+            "Code changes (partial):" \
+            "${{ steps.diff.outputs.diff }}" \
+            "" \
+            "Analyze BOTH the commit messages AND the actual code changes to create a well-formatted release note with:" \
+            "- Summary of changes (based on actual code diff)" \
+            "- Breaking changes (if any, check both commit messages and API changes in code)" \
+            "- New features (feat: commits and new functionality in code)" \
+            "- Bug fixes (fix: commits and bug fixes in code)" \
+            "- Other improvements (perf:, refactor:, docs:, etc.)" \
+            "" \
+            "Use the code diff to provide specific, accurate details about what changed. Format the release notes professionally with proper markdown headings and bullet points. Make it user-friendly and easy to understand." > /tmp/notes_prompt.txt
           
-          Current Version: ${{ steps.last-release.outputs.version }}
-          New Version: ${{ steps.final-version.outputs.final_version }}
-          Last Release SHA: ${{ steps.last-release.outputs.sha }}
-          Current SHA: ${{ github.sha }}
-          Service Name: ${{ inputs.service-name }}
-          
-          Unreleased commits:
-          ${{ steps.commits.outputs.commits_simple }}
-          
-          Analyze the git commits and create a well-formatted release note with:
-          - Summary of changes
-          - Breaking changes (if any, indicated by BREAKING CHANGE or ! in commits)
-          - New features (feat: commits)
-          - Bug fixes (fix: commits)
-          - Other improvements (perf:, refactor:, docs:, etc.)
-          
-          Use conventional commit format. Format the release notes professionally with proper markdown headings and bullet points. Make it user-friendly and easy to understand."
+          PROMPT=$(cat /tmp/notes_prompt.txt)
           
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Content-Type: application/json" \
