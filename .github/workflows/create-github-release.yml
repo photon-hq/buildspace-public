@@ -1,0 +1,135 @@
+name: Create GitHub Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+        description: "The version to release (e.g., 1.2.3)"
+      title:
+        type: string
+        required: true
+        description: "The release title (e.g., 'My Service v1.2.3')"
+      notes:
+        type: string
+        required: false
+        default: ""
+        description: "Release notes in markdown"
+      prerelease:
+        type: boolean
+        required: false
+        default: false
+        description: "Whether this is a prerelease"
+      draft:
+        type: boolean
+        required: false
+        default: false
+        description: "Whether to create as draft"
+      tag-prefix:
+        type: string
+        required: false
+        default: "v"
+        description: "Prefix for the git tag (e.g., 'v' for v1.2.3)"
+      artifact-name:
+        type: string
+        required: false
+        default: ""
+        description: "Name of artifact to download and attach (leave empty for no artifacts)"
+    outputs:
+      release_url:
+        description: "URL of the created release"
+        value: ${{ jobs.release.outputs.url }}
+      tag_name:
+        description: "The created tag name"
+        value: ${{ jobs.release.outputs.tag }}
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      url: ${{ steps.create-release.outputs.url }}
+      tag: ${{ steps.vars.outputs.tag_name }}
+    steps:
+      - name: Set variables
+        id: vars
+        run: |
+          TAG_NAME="${{ inputs.tag-prefix }}${{ inputs.version }}"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "🏷️ Creating release: $TAG_NAME"
+
+      - name: Download artifacts
+        if: inputs.artifact-name != ''
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: ${{ inputs.artifact-name }}*
+          merge-multiple: true
+
+      - name: List artifacts
+        if: inputs.artifact-name != ''
+        run: |
+          echo "📦 Artifacts to attach:"
+          ls -la artifacts/ || echo "No artifacts found"
+
+      - name: Prepare release body
+        id: body
+        env:
+          NOTES: ${{ inputs.notes }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$NOTES" ]; then
+            printf '%s\n' "$NOTES" > /tmp/body.txt
+          else
+            echo "Release $VERSION" > /tmp/body.txt
+          fi
+          
+          echo "" >> /tmp/body.txt
+          echo "---" >> /tmp/body.txt
+          echo "" >> /tmp/body.txt
+          echo "**Version:** $VERSION" >> /tmp/body.txt
+          
+          {
+            echo "body<<BODY_EOF"
+            cat /tmp/body.txt
+            echo "BODY_EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release (with artifacts)
+        if: inputs.artifact-name != ''
+        id: create-release-with-artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          name: ${{ inputs.title }}
+          body: ${{ steps.body.outputs.body }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release (no artifacts)
+        if: inputs.artifact-name == ''
+        id: create-release-no-artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          name: ${{ inputs.title }}
+          body: ${{ steps.body.outputs.body }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set release URL output
+        id: create-release
+        run: |
+          if [ -n "${{ steps.create-release-with-artifacts.outputs.url }}" ]; then
+            echo "url=${{ steps.create-release-with-artifacts.outputs.url }}" >> $GITHUB_OUTPUT
+          else
+            echo "url=${{ steps.create-release-no-artifacts.outputs.url }}" >> $GITHUB_OUTPUT
+          fi

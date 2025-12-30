@@ -1,0 +1,87 @@
+name: Publish to NPM
+
+on:
+  workflow_call:
+    inputs:
+      bun-version:
+        type: string
+        required: false
+        default: "latest"
+        description: "Bun version to use"
+      node-version:
+        type: string
+        required: false
+        default: "20"
+        description: "Node.js version for npm publish"
+      working-directory:
+        type: string
+        required: false
+        default: "."
+        description: "Directory containing package.json"
+      build-command:
+        type: string
+        required: false
+        default: "bun run build"
+        description: "Command to build the package"
+      skip-build:
+        type: boolean
+        required: false
+        default: false
+        description: "Skip the build step"
+      tag:
+        type: string
+        required: false
+        default: "latest"
+        description: "NPM tag to publish with (e.g., 'latest', 'beta', 'next')"
+      access:
+        type: string
+        required: false
+        default: "public"
+        description: "Package access level ('public' or 'restricted')"
+    secrets:
+      NPM_TOKEN:
+        required: true
+        description: "NPM authentication token"
+
+jobs:
+  publish:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build package
+        if: inputs.skip-build != true
+        run: ${{ inputs.build-command }}
+
+      - name: Publish to npm
+        run: npm publish --tag ${{ inputs.tag }} --access ${{ inputs.access }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Log success
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "✅ Published $PACKAGE_NAME@$PACKAGE_VERSION to npm with tag '${{ inputs.tag }}'"
+
