@@ -1,33 +1,35 @@
-name: Semantic Release with AI Notes
+name: Rust Binary Release with AI Notes
 
 on:
   workflow_call:
     inputs:
-      bun-version:
-        type: string
-        required: false
-        default: "latest"
       service-name:
         type: string
         required: true
         description: "The name of the service to release"
-      publish-npm:
+      binary-name:
+        type: string
+        required: true
+        description: "The name of the binary to build (crate name)"
+      binary-path:
         type: string
         required: false
-        default: "false"
-        description: "Whether to publish to npm"
+        default: ""
+        description: "Path to the crate if in a workspace (e.g., crates/client)"
       prerelease:
         type: string
         required: false
         default: "false"
         description: "Whether to create a prerelease"
+      targets:
+        type: string
+        required: false
+        default: "x86_64-unknown-linux-gnu,x86_64-apple-darwin,aarch64-apple-darwin,x86_64-pc-windows-msvc"
+        description: "Comma-separated list of Rust targets to build"
     secrets:
       OPENAI_API_KEY:
         required: true
         description: "OpenAI API key for determining version and generating release notes"
-      NPM_TOKEN:
-        required: false
-        description: "NPM token for publishing"
 
 jobs:
   check-release-label:
@@ -43,7 +45,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // If triggered by pull_request event, use the PR number directly
             if (context.eventName === 'pull_request') {
               const prNumber = context.payload.pull_request.number;
               const { data: pr } = await github.rest.pulls.get({
@@ -51,21 +52,17 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: prNumber
               });
-              
               const labels = pr.labels.map(l => l.name.toLowerCase());
-              
               if (labels.includes('release')) {
                 console.log(`Found 'release' label on PR #${pr.number}. Proceeding with release.`);
                 core.setOutput('has_release_label', 'true');
               } else {
                 console.log(`No 'release' label on PR #${pr.number}. Skipping release.`);
-                console.log(`Current labels: ${labels.join(', ') || 'none'}`);
                 core.setOutput('has_release_label', 'false');
               }
               return;
             }
             
-            // For push events, find PR for this branch
             const currentRef = context.ref;
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner,
@@ -82,38 +79,32 @@ jobs:
             
             const pr = prs[0];
             const labels = pr.labels.map(l => l.name.toLowerCase());
-            
             if (labels.includes('release')) {
               console.log(`Found 'release' label on PR #${pr.number}. Proceeding with release.`);
               core.setOutput('has_release_label', 'true');
             } else {
               console.log(`No 'release' label on PR #${pr.number}. Skipping release.`);
-              console.log(`Current labels: ${labels.join(', ') || 'none'}`);
               core.setOutput('has_release_label', 'false');
             }
 
-  analyze-and-release:
-    name: Analyze Commits & Create Release
+  analyze-version:
+    name: Analyze Commits & Determine Version
     runs-on: ubuntu-latest
     needs: check-release-label
     if: needs.check-release-label.outputs.should_release == 'true'
     permissions:
       contents: write
       pull-requests: read
+    outputs:
+      should_release: ${{ steps.parse-version.outputs.should_release }}
+      version: ${{ steps.final-version.outputs.final_version }}
+      release_notes: ${{ steps.ai-notes.outputs.final-message }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ inputs.bun-version }}
-
-      - name: Install dependencies
-        run: bun install
 
       - name: Get latest release SHA
         id: last-release
@@ -135,30 +126,16 @@ jobs:
                   ref: `tags/${tagName}`
                 });
                 core.setOutput('sha', ref.object.sha);
-                core.setOutput('tag', tagName);
-                core.setOutput('version', tagName.replace(/^v/, '')); // Remove 'v' prefix if present
+                core.setOutput('version', tagName.replace(/^v/, ''));
               } else {
-                // No releases exist, use initial commit
-                const { data: commits } = await github.rest.repos.listCommits({
+                const allCommits = await github.paginate(github.rest.repos.listCommits, {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  per_page: 1,
-                  sha: 'HEAD'
+                  per_page: 100
                 });
-                if (commits.length > 0) {
-                  // Get the first commit (oldest)
-                  const allCommits = await github.paginate(github.rest.repos.listCommits, {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    per_page: 100
-                  });
-                  const firstCommit = allCommits[allCommits.length - 1];
-                  core.setOutput('sha', firstCommit.sha);
-                  core.setOutput('version', '0.0.0');
-                } else {
-                  core.setOutput('sha', context.sha);
-                  core.setOutput('version', '0.0.0');
-                }
+                const firstCommit = allCommits[allCommits.length - 1];
+                core.setOutput('sha', firstCommit.sha);
+                core.setOutput('version', '0.0.0');
               }
             } catch (error) {
               core.setOutput('sha', context.sha);
@@ -187,20 +164,15 @@ jobs:
         id: parse-version
         run: |
           AI_RESPONSE="${{ steps.ai-version.outputs.final-message }}"
-          
-          # Extract version number (X.Y.Z format) or check for "none"
           if echo "$AI_RESPONSE" | grep -qiE "none|skip|no release"; then
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "next_version=none" >> $GITHUB_OUTPUT
           else
-            # Extract version number (format: X.Y.Z)
             NEXT_VERSION=$(echo "$AI_RESPONSE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-            
             if [ -z "$NEXT_VERSION" ]; then
               echo "::error::AI did not return a valid version number. Response: $AI_RESPONSE"
               exit 1
             fi
-            
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
           fi
@@ -210,17 +182,12 @@ jobs:
         if: steps.parse-version.outputs.should_release == 'true'
         run: |
           BASE_VERSION="${{ steps.parse-version.outputs.next_version }}"
-          
           if [ "${{ inputs.prerelease }}" == "true" ]; then
-            # Append prerelease suffix (you can customize this)
             FINAL_VERSION="${BASE_VERSION}-rc.${GITHUB_RUN_NUMBER}"
-            echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
-            echo "Creating prerelease: $FINAL_VERSION"
           else
             FINAL_VERSION="$BASE_VERSION"
-            echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
-            echo "Creating release: $FINAL_VERSION"
           fi
+          echo "final_version=$FINAL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Generate AI Release Notes
         id: ai-notes
@@ -246,20 +213,105 @@ jobs:
             7. Use emojis SPARINGLY - 1-2 total, prefer people emojis (🙋‍♀️🙋‍♂️👋)
             8. Be friendly and engaging
 
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    needs: analyze-version
+    if: needs.analyze-version.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build binary
+        run: |
+          if [ -n "${{ inputs.binary-path }}" ]; then
+            cargo build --release --target ${{ matrix.target }} -p ${{ inputs.binary-name }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Prepare artifact (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/${{ inputs.binary-name }} artifacts/${{ inputs.binary-name }}-${{ matrix.target }}
+          chmod +x artifacts/${{ inputs.binary-name }}-${{ matrix.target }}
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/${{ inputs.binary-name }}.exe artifacts/${{ inputs.binary-name }}-${{ matrix.target }}.exe
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-${{ matrix.target }}
+          path: artifacts/*
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [analyze-version, build-binaries]
+    if: needs.analyze-version.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
       - name: Prepare release body
         id: release-body
-        if: steps.parse-version.outputs.should_release == 'true'
         env:
-          AI_NOTES: ${{ steps.ai-notes.outputs.final-message }}
+          RELEASE_NOTES: ${{ needs.analyze-version.outputs.release_notes }}
+          VERSION: ${{ needs.analyze-version.outputs.version }}
+          BINARY_NAME: ${{ inputs.binary-name }}
         run: |
-          # Build body with AI notes
-          printf '%s\n' "$AI_NOTES" > /tmp/body.txt
+          # Write release notes from env var to avoid shell interpretation
+          printf '%s\n' "$RELEASE_NOTES" > /tmp/body.txt
           echo "" >> /tmp/body.txt
           echo "---" >> /tmp/body.txt
           echo "" >> /tmp/body.txt
-          echo "**Version:** ${{ steps.last-release.outputs.version }} → ${{ steps.final-version.outputs.final_version }}" >> /tmp/body.txt
+          echo "**Version:** $VERSION" >> /tmp/body.txt
+          echo "" >> /tmp/body.txt
+          echo "### Downloads" >> /tmp/body.txt
+          echo "" >> /tmp/body.txt
+          echo "| Platform | Download |" >> /tmp/body.txt
+          echo "|----------|----------|" >> /tmp/body.txt
+          echo "| Linux (x86_64) | \`${BINARY_NAME}-x86_64-unknown-linux-gnu\` |" >> /tmp/body.txt
+          echo "| macOS (Intel) | \`${BINARY_NAME}-x86_64-apple-darwin\` |" >> /tmp/body.txt
+          echo "| macOS (Apple Silicon) | \`${BINARY_NAME}-aarch64-apple-darwin\` |" >> /tmp/body.txt
+          echo "| Windows | \`${BINARY_NAME}-x86_64-pc-windows-msvc.exe\` |" >> /tmp/body.txt
           
-          # Write to output using multiline format
           {
             echo "body<<BODY_EOF"
             cat /tmp/body.txt
@@ -267,46 +319,13 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        if: steps.parse-version.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.final-version.outputs.final_version }}
-          name: ${{ inputs.service-name }} v${{ steps.final-version.outputs.final_version }}
+          tag_name: v${{ needs.analyze-version.outputs.version }}
+          name: ${{ inputs.service-name }} v${{ needs.analyze-version.outputs.version }}
           body: ${{ steps.release-body.outputs.body }}
           draft: false
           prerelease: ${{ inputs.prerelease == 'true' }}
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish:
-    name: Publish to NPM
-    runs-on: ubuntu-latest
-    needs: analyze-and-release
-    if: inputs.publish-npm == 'true' && inputs.prerelease != 'true'
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ inputs.bun-version }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build
-        run: bun run build
-
-      - name: Publish to npm
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
