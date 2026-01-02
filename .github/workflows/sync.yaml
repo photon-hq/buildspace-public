@@ -17,37 +17,14 @@ jobs:
           persist-credentials: false
 
       - name: Sync to public buildspace
-        env:
-          API_TOKEN: ${{ secrets.SYNC_TOKEN }}
         run: |
-          # Clean the token (remove any whitespace/newlines)
-          API_TOKEN=$(printf '%s' "$API_TOKEN" | tr -d '[:space:]')
-          
-          # Debug: check token
-          echo "Token length after cleaning: ${#API_TOKEN}"
-          echo "Token starts with: ${API_TOKEN:0:10}..."
-          
-          if [ -z "$API_TOKEN" ]; then
-            echo "::error::SYNC_TOKEN is empty after cleaning!"
-            exit 1
-          fi
-          
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
-          
-          # Disable credential helpers that override our token
-          git config --global --unset-all credential.helper || true
-          git config --global credential.helper ""
-          
-          # Remove origin remote to avoid credential conflicts
-          git remote remove origin || true
           
           echo "Removing sync.yaml to prevent circular pushes..."
           git rm -f .github/workflows/sync.yaml
           git commit -m "chore: remove sync workflow for public repo [skip ci]"
           
-          # Add remote with token embedded (now safe since persist-credentials: false)
-          git remote add public "https://x-access-token:${API_TOKEN}@github.com/photon-hq/buildspace.git"
-          
-          echo "Pushing to public buildspace..."
-          git push public main --force
+          git remote add public https://oauth2:${{ secrets.SYNC_TOKEN }}@github.com/photon-hq/buildspace-private.git
+          git push public --force --all
+          git push public --force --tags
