@@ -70,7 +70,7 @@ runs:
             if (!hasLabel && !pr && defaultOnPush.includes(labelLower)) {
               hasLabel = true;
             }
-            results[label] = hasLabel;
+            results[labelLower] = hasLabel;
           }
           
           console.log('Label check results:', JSON.stringify(results));
