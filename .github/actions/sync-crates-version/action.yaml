@@ -47,8 +47,8 @@ runs:
         # This doesn't do any git checks - just updates Cargo.toml files
         cargo set-version --workspace ${VERSION}
         
-        # Get updated crates for output
-        UPDATED_CRATES=$(cargo metadata --no-deps --format-version 1 | jq '[.packages[].name]')
+        # Get updated crates for output (use -c for compact single-line JSON)
+        UPDATED_CRATES=$(cargo metadata --no-deps --format-version 1 | jq -c '[.packages[].name]')
         echo "updated-crates=${UPDATED_CRATES}" >> $GITHUB_OUTPUT
         
         echo ""
