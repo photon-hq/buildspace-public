@@ -24,9 +24,10 @@ runs:
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Install cargo-release
-      shell: bash
-      run: cargo install cargo-release --locked
+    - name: Install cargo-edit
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-edit
 
     - name: Configure git
       shell: bash
@@ -34,19 +35,17 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
-    - name: Sync workspace version with cargo-release
+    - name: Sync workspace version
       id: sync
       shell: bash
       run: |
         VERSION="${{ inputs.version }}"
         
-        echo "Setting all workspace crates to version ${VERSION} using cargo-release..."
+        echo "Setting all workspace crates to version ${VERSION}..."
         
-        # Use 'cargo release version' to bump versions (supports --allow-dirty)
-        cargo release version ${VERSION} \
-          --execute \
-          --no-confirm \
-          --allow-dirty
+        # Use 'cargo set-version' to set version across all workspace crates
+        # This doesn't do any git checks - just updates Cargo.toml files
+        cargo set-version --workspace ${VERSION}
         
         # Get updated crates for output
         UPDATED_CRATES=$(cargo metadata --no-deps --format-version 1 | jq '[.packages[].name]')
