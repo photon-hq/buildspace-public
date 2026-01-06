@@ -37,27 +37,16 @@ runs:
     - name: Sync workspace version with cargo-release
       id: sync
       shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         VERSION="${{ inputs.version }}"
-        PUSH_FLAG=""
-        
-        if [ "${{ inputs.commit-changes }}" != "true" ]; then
-          PUSH_FLAG="--no-push"
-        fi
         
         echo "Setting all workspace crates to version ${VERSION} using cargo-release..."
         
-        # cargo-release handles: version bump, commit, push
-        # --no-publish: we handle publishing separately in publish-crates
-        # --no-tag: we create tags via GitHub release action
-        cargo release ${VERSION} \
+        # Use 'cargo release version' to bump versions (supports --allow-dirty)
+        cargo release version ${VERSION} \
           --execute \
           --no-confirm \
-          --no-publish \
-          --no-tag \
-          ${PUSH_FLAG}
+          --allow-dirty
         
         # Get updated crates for output
         UPDATED_CRATES=$(cargo metadata --no-deps --format-version 1 | jq '[.packages[].name]')
@@ -66,3 +55,22 @@ runs:
         echo ""
         echo "Updated crates to version ${VERSION}:"
         cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "  - \(.name): \(.version)"'
+
+    - name: Commit and push changes
+      if: inputs.commit-changes == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        VERSION="${{ inputs.version }}"
+        
+        # Stage all changed files
+        git add -A
+        
+        # Commit and push
+        if ! git diff --staged --quiet; then
+          git commit -m "chore: bump version to ${VERSION}"
+          git push
+        else
+          echo "No changes to commit"
+        fi
