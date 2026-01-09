@@ -148,9 +148,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.ref }}
-      - name: Pull latest changes
-        run: git pull --ff-only origin ${{ github.ref_name }}
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
       - name: Publish to NPM
         uses: photon-hq/buildspace/.github/actions/publish-npm@main
         with:
