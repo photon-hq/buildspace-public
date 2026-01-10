@@ -106,6 +106,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version-bumped: ${{ steps.commit.outputs.version-bumped }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -121,6 +123,7 @@ jobs:
           npm version ${VERSION} --no-git-tag-version --allow-same-version
           echo "Updated to version ${VERSION}"
       - name: Commit and push
+        id: commit
         run: |
           VERSION="${{ needs.release-info.outputs.version }}"
           git config user.name "github-actions[bot]"
@@ -130,11 +133,14 @@ jobs:
             git commit -m "chore: bump version to ${VERSION}"
             git pull --rebase origin ${{ github.ref_name }}
             git push
+            echo "version-bumped=true" >> $GITHUB_OUTPUT
+          else
+            echo "version-bumped=false" >> $GITHUB_OUTPUT
           fi
 
   github-release:
     needs: [check-labels, release-info, bump-version]
-    if: fromJSON(needs.check-labels.outputs.labels).release || inputs.release
+    if: (fromJSON(needs.check-labels.outputs.labels).release || inputs.release) && needs.bump-version.outputs.version-bumped == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -149,7 +155,7 @@ jobs:
 
   npm-publish:
     needs: [check-labels, release-info, bump-version]
-    if: (fromJSON(needs.check-labels.outputs.labels).release || inputs.release) && inputs.no-npm-publish != true
+    if: (fromJSON(needs.check-labels.outputs.labels).release || inputs.release) && inputs.no-npm-publish != true && needs.bump-version.outputs.version-bumped == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
