@@ -510,7 +510,8 @@ Publishes workspace crates to crates.io in dependency order. Includes retry logi
 ```yaml
 - uses: photon-hq/buildspace/.github/actions/publish-crates@main
   with:
-    crates: '["crates/shared", "crates/client"]'  # Shared first (dependency)
+    # Shared first (dependency)
+    crates: '["crates/shared", "crates/client"]'
     cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 ```
 
