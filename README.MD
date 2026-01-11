@@ -95,7 +95,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-    with:
+  with:
       service-name: my-package
       build-command: "npm run build"
     secrets:
@@ -586,40 +586,58 @@ buildspace/
 
 ### How Releases Work
 
+This secition addresses `rust-service-release` and `typescript-service-release`.
+
+These workflows are complete for fully ai-powered and automated releases from versioning to version notes to publishing. These workflows are built upon the building block actions in the 'actions' folder 
+
+Both workflows share the same initial steps, then diverge for language-specific publishing. The following 
+diagram is most accurate. 
+
 ```
-┌─────────────┐     ┌───────────────┐     ┌──────────────────┐
-│  PR Merged  │────▶│ Check Labels  │────▶│ Generate Version │
-│ with label  │     │  (release?)   │     │  + Release Notes │
-└─────────────┘     └───────────────┘     └──────────────────┘
-                                                    │
-                    ┌───────────────────────────────┴───────────────────────────┐
-                    │                                                           │
-                    ▼                                                           ▼
-        ┌───────────────────┐                                     ┌──────────────────┐
-        │    Rust Path      │                                     │  TypeScript Path │
-        └───────────────────┘                                     └──────────────────┘
-                    │                                                           │
-        ┌───────────┴───────────┐                                              │
-        │                       │                                              │
-        ▼                       ▼                                              ▼
-┌───────────────┐     ┌─────────────────┐                            ┌─────────────────┐
-│ Build Binaries│     │  Sync Versions  │                            │  Bump Version   │
-│ (Linux/macOS/ │     │  (all crates)   │                            │ (package.json)  │
-│   Windows)    │     └─────────────────┘                            └─────────────────┘
-└───────────────┘               │                                              │
-        │                       ▼                                              │
-        │             ┌─────────────────┐                                      │
-        │             │ Publish Crates  │                                      │
-        │             │  (crates.io)    │                                      │
-        │             └─────────────────┘                                      │
-        │                       │                                              │
-        └───────────┬───────────┘                                              │
-                    │                                                          │
-                    ▼                                                          ▼
-        ┌───────────────────┐                                     ┌──────────────────┐
-        │  GitHub Release   │                                     │  GitHub Release  │
-        │  (with binaries)  │                                     │  + npm Publish   │
-        └───────────────────┘                                     └──────────────────┘
+                        ╔═══════════════════════════════════════════════════╗
+                        ║              SHARED STEPS (both workflows)        ║
+                        ╠═══════════════════════════════════════════════════╣
+                        ║                                                   ║
+                        ║  ┌─────────────┐     ┌───────────────┐            ║
+                        ║  │  PR Merged  │────▶│ Check Labels  │            ║
+                        ║  │ with label  │     │  (release?)   │            ║
+                        ║  └─────────────┘     └───────────────┘            ║
+                        ║                              │                    ║
+                        ║                              ▼                    ║
+                        ║                    ┌──────────────────┐           ║
+                        ║                    │ Generate Version │           ║
+                        ║                    │  + Release Notes │           ║
+                        ║                    │     (AI-powered) │           ║
+                        ║                    └──────────────────┘           ║
+                        ║                              │                    ║
+                        ╚══════════════════════════════╪════════════════════╝
+                                                       │
+                 ┌─────────────────────────────────────┴─────────────────────────────────────┐
+                 │                                                                           │
+                 ▼                                                                           ▼
+╔════════════════════════════════════════╗            ╔════════════════════════════════════════╗
+║   rust-service-release.yaml            ║            ║   typescript-service-release.yaml      ║
+╠════════════════════════════════════════╣            ╠════════════════════════════════════════╣
+║                                        ║            ║                                        ║
+║   ┌───────────────┐ ┌───────────────┐  ║            ║         ┌─────────────────┐            ║
+║   │ Build Binaries│ │ Sync Versions │  ║            ║         │  Bump Version   │            ║
+║   │ (Linux/macOS/ │ │ (all crates)  │  ║            ║         │ (package.json)  │            ║
+║   │   Windows)    │ └───────────────┘  ║            ║         └─────────────────┘            ║
+║   └───────────────┘         │          ║            ║                   │                    ║
+║           │                 ▼          ║            ║         ┌─────────┴─────────┐          ║
+║           │       ┌─────────────────┐  ║            ║         │                   │          ║
+║           │       │ Publish Crates  │  ║            ║         ▼                   ▼          ║
+║           │       │  (crates.io)    │  ║            ║  ┌──────────────┐   ┌─────────────┐    ║
+║           │       └─────────────────┘  ║            ║  │GitHub Release│   │ npm Publish │    ║
+║           │                 │          ║            ║  └──────────────┘   └─────────────┘    ║
+║           └────────┬────────┘          ║            ║                                        ║
+║                    ▼                   ║            ╚════════════════════════════════════════╝
+║         ┌───────────────────┐          ║
+║         │  GitHub Release   │          ║
+║         │  (with binaries)  │          ║
+║         └───────────────────┘          ║
+║                                        ║
+╚════════════════════════════════════════╝
 ```
 
 ---
