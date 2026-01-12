@@ -8,7 +8,7 @@
 
 **Reusable GitHub Actions workflows and composite actions for automated releases at Photon.**
 
-Buildspace provides battle-tested CI/CD building blocks that handle semantic versioning, release notes generation, multi-platform builds, and publishing to npm/crates.io—all powered by AI.
+Buildspace provides battle-tested CI/CD building blocks that handle semantic versioning, release notes generation, multi-platform builds, and publishing to npm/crates.io, all powered by AI.
 
 ---
 
