@@ -37,11 +37,14 @@ runs:
       run: |
         echo "final=${{ steps.version-info.outputs.version }}" >> $GITHUB_OUTPUT
 
+    - name: Clear Codex Config
+      shell: bash
+      run: rm -f ~/.codex/config.toml
+
     - name: AI Generate Notes
       id: ai-notes
       uses: openai/codex-action@v1
       with:
-        openai-api-key: ${{ inputs.openai-api-key }}
         prompt: |
           Generate release notes for ${{ inputs.service-name }} v${{ steps.version.outputs.final }}.
           Changes since v${{ steps.version-info.outputs.previous-version }} (current commit: ${{ github.sha }}).
