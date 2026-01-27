@@ -1,0 +1,40 @@
+name: "Swift Build"
+description: "Build Swift project"
+
+inputs:
+  swift-version:
+    description: "Swift version to use"
+    required: false
+  compile-env:
+    description: "Env values to set when compiling"
+    required: false
+    default: ""
+
+outputs:
+  binary-path:
+    description: "Path to built binary"
+    value: ${{ steps.build.outputs.binary-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: swift-actions/setup-swift@v3
+      with:
+        swift-version: "${{ inputs.swift-version }}"
+    - uses: actions/checkout@v5
+    - name: Prepare .env
+      if: inputs.compile-env != ''
+      shell: bash
+      run: |
+        echo "${{ inputs.compile-env }}" > .env
+        source .env
+    - name: Create artifacts directory
+      run: mkdir -p artifacts
+      shell: bash
+    - name: Build Swift Binary
+      shell: bash
+      id: build
+      run: |
+        BIN_PATH="$(swift build --show-bin-path -c release)"
+        cp $BIN_PATH artifacts/
+        echo "binary-path=$BIN_PATH" >> $GITHUB_OUTPUT
