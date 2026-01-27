@@ -56,10 +56,14 @@ jobs:
           compile-env: |-
             VERSION=${{ needs.prepare-release.outputs.version }}
             ${{ secrets.SECRET_ENV_VARS }}
+      - name: Swift Package
+        uses: photon-hq/buildspace/.github/blocks/swift-pkg@main
+        with:
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.binary-name }}
-          path: artifacts/*
+          path: /artifacts/*
 
   github-release:
     needs: build

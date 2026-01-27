@@ -29,12 +29,12 @@ runs:
         echo "${{ inputs.compile-env }}" > .env
         source .env
     - name: Create artifacts directory
-      run: mkdir -p artifacts
+      run: mkdir -p /artifacts
       shell: bash
     - name: Build Swift Binary
       shell: bash
       id: build
       run: |
         BIN_PATH="$(swift build --show-bin-path -c release)"
-        cp $BIN_PATH artifacts/
+        cp $BIN_PATH /artifacts
         echo "binary-path=$BIN_PATH" >> $GITHUB_OUTPUT
