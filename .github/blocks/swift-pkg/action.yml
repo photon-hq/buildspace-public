@@ -1,0 +1,43 @@
+name: "Swift Package"
+description: "Build distribution package for Swift"
+
+inputs:
+  swift-binary-path:
+    required: true
+    description: "Path to your swift binary"
+  identifier:
+    required: true
+    description: "Package identifier"
+  version:
+    required: true
+    description: "Package version"
+  package-name:
+    required: true
+    description: "Package name"
+  developer-id-installer:
+    required: true
+    description: "Developer ID Installer certificate name"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare
+      shell: bash
+      run: |
+        mkdir -p /tmp/pkgroot/usr/local/bin
+        cp ${{ inputs.swift-binary-path }} /tmp/pkgroot/usr/local/bin
+        mkdir -p /artifacts
+    - name: Create package
+      shell: bash
+      run: |
+        pkgbuild --root /tmp/pkgroot \
+            --identifier ${{ inputs.identifier }} \
+            --install-location / \
+            --version ${{ inputs.version }} \
+            "${{ inputs.package-name }}-component.pkg"
+    - name: Sign package
+      shell: bash
+      run: productbuild --package "${{ inputs.package-name }}-component.pkg" --sign "${{ inputs.developer-id-installer }}" "${{ inputs.package-name }}.pkg"
+    - name: Prepare artifact
+      shell: bash
+      run: cp "${{ inputs.package-name }}.pkg" /artifacts

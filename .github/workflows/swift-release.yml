@@ -1,0 +1,96 @@
+name: Swift Distribution Package Release
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        type: string
+        required: true
+        description: "The name of the service to release"
+      package-name:
+        type: string
+        required: true
+        description: "The name of the package to release"
+      identifier:
+        type: string
+        required: true
+        description: "The identifier of the package to release"
+    secrets:
+      DEVELOPER_ID_INSTALLER:
+        required: true
+      SECRET_ENV_VARS:
+        required: false
+      OPENAI_API_KEY:
+        required: true
+
+jobs:
+  check-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      contents: read
+    outputs:
+      labels: ${{ steps.check.outputs.labels }}
+    steps:
+      - name: Check PR Labels
+        id: check
+        uses: photon-hq/buildspace/.github/blocks/check-pr-label@main
+        with:
+          labels: '["release"]'
+
+  prepare-release:
+    needs: check-labels
+    if: fromJSON(needs.check-labels.outputs.labels).release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.generate.outputs.version }}
+      release_notes: ${{ steps.generate.outputs.release_notes }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate Release Info
+        id: generate
+        uses: photon-hq/buildspace/.github/blocks/generate-release-info@main
+        with:
+          service-name: ${{ inputs.service-name }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  build:
+    needs: prepare-release
+    runs-on: macos-latest
+    steps:
+      - name: Swift Build
+        id: build
+        uses: photon-hq/buildspace/.github/blocks/swift-build@main
+        with:
+          binary-name: ${{ inputs.package-name }}
+          compile-env: |-
+            VERSION=${{ needs.prepare-release.outputs.version }}
+            ${{ secrets.SECRET_ENV_VARS }}
+      - name: Swift Package
+        uses: photon-hq/buildspace/.github/blocks/swift-pkg@main
+        with:
+          swift-binary-path: ${{ steps.build.outputs.binary-path }}
+          package-name: ${{ inputs.package-name }}
+          developer-id-installer: ${{ secrets.DEVELOPER_ID_INSTALLER }}
+          identifier: ${{ inputs.identifier }}
+          version: ${{ needs.prepare-release.outputs.version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.service-name }}
+          path: /artifacts/*
+
+  github-release:
+    needs: [build, prepare-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        uses: photon-hq/buildspace/.github/blocks/create-github-release@main
+        with:
+          version: ${{ needs.prepare-release.outputs.version }}
+          title: "${{ inputs.service-name }} v${{ needs.prepare-release.outputs.version }}"
+          notes: ${{ needs.prepare-release.outputs.release_notes }}
+          artifact-pattern: ${{ inputs.service-name }}
+
