@@ -1,4 +1,4 @@
-# 🚀 Buildspace
+# 🚀 BuildSpace
 
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?logo=github-actions&logoColor=white)](https://github.com/features/actions)
 [![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -8,7 +8,7 @@
 
 **Reusable GitHub Actions blocks and workflows for fast shipping teams**
 
-Buildspace packages battle-tested, AI-powered CI/CD building blocks, like generating release notes, bumping versions, publishing, plus ready-made workflows built from those blocks, so teams can either compose custom automations or plug in the prebuilt recipes with only a few inputs.
+BuildSpace packages battle-tested, AI-powered CI/CD building blocks, like generating release notes, bumping versions, publishing, plus ready-made workflows built from those blocks, so teams can either compose custom automations or plug in the prebuilt recipes with only a few inputs.
 
 ---
 
