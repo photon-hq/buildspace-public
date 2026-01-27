@@ -26,7 +26,7 @@ runs:
       run: |
         mkdir -p /tmp/pkgroot/usr/local/bin
         cp ${{ inputs.swift-binary-path }} /tmp/pkgroot/usr/local/bin
-        mkdir -p /artifacts
+        mkdir -p artifacts
     - name: Create package
       shell: bash
       run: |
@@ -40,4 +40,4 @@ runs:
       run: productbuild --package "${{ inputs.package-name }}-component.pkg" --sign "${{ inputs.developer-id-installer }}" "${{ inputs.package-name }}.pkg"
     - name: Prepare artifact
       shell: bash
-      run: cp "${{ inputs.package-name }}.pkg" /artifacts
+      run: cp "${{ inputs.package-name }}.pkg" artifacts
