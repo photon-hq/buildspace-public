@@ -2,9 +2,6 @@ name: "Swift Build"
 description: "Build Swift project"
 
 inputs:
-  swift-version:
-    description: "Swift version to use"
-    required: false
   binary-name:
     description: "Name of the binary to build"
     required: false
@@ -23,8 +20,6 @@ runs:
   steps:
     - uses: actions/checkout@v5
     - uses: swift-actions/setup-swift@v3
-      with:
-        swift-version: "${{ inputs.swift-version }}"
     - name: Prepare .env
       if: inputs.compile-env != ''
       shell: bash
