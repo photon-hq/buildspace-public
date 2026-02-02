@@ -23,6 +23,9 @@ inputs:
   developer-id-installer-name:
     required: true
     description: "Certificate name (e.g., 'Developer ID Installer: Company (TEAMID)')"
+  scripts-path:
+    required: false
+    description: "Path to scripts directory containing preinstall/postinstall scripts"
 
 runs:
   using: "composite"
@@ -55,10 +58,15 @@ runs:
     - name: Create package
       shell: bash
       run: |
+        SCRIPTS_ARG=""
+        if [ -n "${{ inputs.scripts-path }}" ]; then
+          SCRIPTS_ARG="--scripts ${{ inputs.scripts-path }}"
+        fi
         pkgbuild --root tmp/pkgroot \
             --identifier ${{ inputs.identifier }} \
             --install-location / \
             --version ${{ inputs.version }} \
+            $SCRIPTS_ARG \
             "${{ inputs.package-name }}-component.pkg"
 
     - name: Sign package
