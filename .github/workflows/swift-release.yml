@@ -2,10 +2,6 @@ name: Swift Distribution Package Release
 on:
   workflow_call:
     inputs:
-      service-name:
-        type: string
-        required: true
-        description: "The name of the service to release"
       package-name:
         type: string
         required: true
@@ -14,6 +10,10 @@ on:
         type: string
         required: true
         description: "The identifier of the package to release"
+      scripts-path:
+        type: string
+        required: false
+        description: "Path to scripts directory containing preinstall/postinstall scripts"
     secrets:
       DEVELOPER_ID_INSTALLER_BASE64:
         required: true
@@ -56,7 +56,7 @@ jobs:
         id: generate
         uses: photon-hq/buildspace/.github/blocks/generate-release-info@main
         with:
-          service-name: ${{ inputs.service-name }}
+          service-name: ${{ inputs.package-name }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
   build:
@@ -81,9 +81,10 @@ jobs:
           developer-id-installer-name: ${{ secrets.DEVELOPER_ID_INSTALLER_NAME }}
           identifier: ${{ inputs.identifier }}
           version: ${{ needs.prepare-release.outputs.version }}
+          scripts-path: ${{ inputs.scripts-path }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.service-name }}
+          name: ${{ inputs.package-name }}
           path: artifacts/*
 
   github-release:
@@ -96,7 +97,7 @@ jobs:
         uses: photon-hq/buildspace/.github/blocks/create-github-release@main
         with:
           version: ${{ needs.prepare-release.outputs.version }}
-          title: "${{ inputs.service-name }} v${{ needs.prepare-release.outputs.version }}"
+          title: "${{ inputs.package-name }} v${{ needs.prepare-release.outputs.version }}"
           notes: ${{ needs.prepare-release.outputs.release_notes }}
-          artifact-pattern: ${{ inputs.service-name }}
+          artifact-pattern: ${{ inputs.package-name }}
 
