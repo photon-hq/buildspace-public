@@ -52,6 +52,8 @@ jobs:
       release_notes: ${{ steps.generate.outputs.release_notes }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Generate Release Info
         id: generate
         uses: photon-hq/buildspace/.github/blocks/generate-release-info@main
