@@ -37,20 +37,30 @@ runs:
       run: |
         echo "final=${{ steps.version-info.outputs.version }}" >> $GITHUB_OUTPUT
 
+    - name: Check if initial release
+      id: release-context
+      shell: bash
+      run: |
+        PREV="${{ steps.version-info.outputs.previous-version }}"
+        if [ "$PREV" = "0.0.0" ] || [ -z "$PREV" ]; then
+          echo "is_initial=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_initial=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: AI Generate Notes
       id: ai-notes
       uses: openai/codex-action@v1
       with:
         prompt: |
           Generate release notes for ${{ inputs.service-name }} v${{ steps.version.outputs.final }}.
-          Changes since v${{ steps.version-info.outputs.previous-version }} (current commit: ${{ github.sha }}).
+          ${{ steps.release-context.outputs.is_initial == 'true' && format('This is the initial release. Describe the key features and capabilities of {0} based on the codebase.', inputs.service-name) || format('Changes since v{0} (current commit: {1}).', steps.version-info.outputs.previous-version, github.sha) }}
           
           REQUIREMENTS:
           1. NO title - start with content directly
           2. Plain language - like explaining to a friend
           3. SHORT - 1-2 sentences per item
-          4. Group: ## New Features, ## Bug Fixes, ## Improvement, if they exist. For example, 
-          if there are no new features, bug fixes, or improvements, don't include them.
+          ${{ steps.release-context.outputs.is_initial == 'true' && '4. Group: ## Key Features, ## Highlights. Summarize what this tool does and why it''s useful.' || '4. Group: ## New Features, ## Bug Fixes, ## Improvement, if they exist. For example, if there are no new features, bug fixes, or improvements, don''t include them.' }}
           5. Only include breaking changes if they exist
           6. Include commit SHAs if necessary. If the commit is large, don't include it.
           7. 1-2 emojis max for personality
